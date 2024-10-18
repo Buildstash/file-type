@@ -191,7 +191,7 @@ export class FileTypeParser {
 			};
 		}
 
-		if (this.check([0x78, 0x01])) {
+		if (this.check([0x78])) {
 			return {
 				ext: 'dmg',
 				mime: 'application/x-apple-diskimage',
