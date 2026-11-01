@@ -16,13 +16,16 @@ We accept contributions for commonly used modern file formats, not historical or
 npm install file-type
 ```
 
-**This package is an ESM package. Your project needs to be ESM too. [Read more](https://gist.github.com/sindresorhus/a39789f98801d908bbc7ff3ecc99d99c).**
+**This package is an ESM package. Your project needs to be ESM too. [Read more](https://gist.github.com/sindresorhus/a39789f98801d908bbc7ff3ecc99d99c). For TypeScript + CommonJS, see [`load-esm`](https://github.com/Borewit/load-esm).** If you use it with Webpack, you need the latest Webpack version and ensure you configure it correctly for ESM.
 
-If you use it with Webpack, you need the latest Webpack version and ensure you configure it correctly for ESM.
+> [!IMPORTANT]
+> File type detection is based on binary signatures (magic numbers) and is a best-effort hint. It does not guarantee the file is actually of that type or that the file is valid/not malformed.
+>
+> Robustness against malformed input is best-effort. When processing untrusted files on a server, enforce a reasonable file size limit and use a worker thread with a timeout (e.g., [`make-asynchronous`](https://github.com/sindresorhus/make-asynchronous)). These are not considered security issues in this package.
 
 ## Usage
 
-#### Node.js
+### Node.js
 
 Determine file type from a file:
 
@@ -48,52 +51,6 @@ console.log(await fileTypeFromBuffer(buffer));
 Determine file type from a stream:
 
 ```js
-import fs from 'node:fs';
-import {fileTypeFromStream} from 'file-type';
-
-const stream = fs.createReadStream('Unicorn.mp4');
-
-console.log(await fileTypeFromStream(stream));
-//=> {ext: 'mp4', mime: 'video/mp4'}
-```
-
-The stream method can also be used to read from a remote location:
-
-```js
-import got from 'got';
-import {fileTypeFromStream} from 'file-type';
-
-const url = 'https://upload.wikimedia.org/wikipedia/en/a/a9/Example.jpg';
-
-const stream = got.stream(url);
-
-console.log(await fileTypeFromStream(stream));
-//=> {ext: 'jpg', mime: 'image/jpeg'}
-```
-
-Another stream example:
-
-```js
-import stream from 'node:stream';
-import fs from 'node:fs';
-import crypto from 'node:crypto';
-import {fileTypeStream} from 'file-type';
-
-const read = fs.createReadStream('encrypted.enc');
-const decipher = crypto.createDecipheriv(alg, key, iv);
-
-const streamWithFileType = await fileTypeStream(stream.pipeline(read, decipher));
-
-console.log(streamWithFileType.fileType);
-//=> {ext: 'mov', mime: 'video/quicktime'}
-
-const write = fs.createWriteStream(`decrypted.${streamWithFileType.fileType.ext}`);
-streamWithFileType.pipe(write);
-```
-
-#### Browser
-
-```js
 import {fileTypeFromStream} from 'file-type';
 
 const url = 'https://upload.wikimedia.org/wikipedia/en/a/a9/Example.jpg';
@@ -107,9 +64,9 @@ console.log(fileType);
 
 ## API
 
-### fileTypeFromBuffer(buffer)
+### fileTypeFromBuffer(buffer, options)
 
-Detect the file type of a `Uint8Array`, or `ArrayBuffer`.
+Detect the file type of a `Uint8Array` or `ArrayBuffer`.
 
 The file type is detected by checking the [magic number](https://en.wikipedia.org/wiki/Magic_number_(programming)#Magic_numbers_in_files) of the buffer.
 
@@ -128,15 +85,13 @@ Type: `Uint8Array | ArrayBuffer`
 
 A buffer representing file data. It works best if the buffer contains the entire file. It may work with a smaller portion as well.
 
-### fileTypeFromFile(filePath)
+### fileTypeFromFile(filePath, options)
 
 Detect the file type of a file path.
 
-This is for Node.js only.
+Only available in environments where `node:fs` is available, such as Node.js. To read from a [`File`](https://developer.mozilla.org/docs/Web/API/File), see [`fileTypeFromBlob()`](#filetypefromblobblob-options).
 
-To read from a [`File`](https://developer.mozilla.org/docs/Web/API/File), see [`fileTypeFromBlob()`](#filetypefromblobblob).
-
-The file type is detected by checking the [magic number](https://en.wikipedia.org/wiki/Magic_number_(programming)#Magic_numbers_in_files) of the buffer.
+The file type is detected by checking the [magic number](https://en.wikipedia.org/wiki/Magic_number_(programming)#Magic_numbers_in_files) of the file.
 
 Returns a `Promise` for an object with the detected file type:
 
@@ -151,13 +106,9 @@ Type: `string`
 
 The file path to parse.
 
-### fileTypeFromStream(stream)
+### fileTypeFromStream(stream, options)
 
 Detect the file type of a [web `ReadableStream`](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream).
-
-If the engine is Node.js, this may also be a [Node.js `stream.Readable`](https://nodejs.org/api/stream.html#stream_class_stream_readable).
-
-Direct support for Node.js streams will be dropped in the future, when Node.js streams can be converted to Web streams (see [`toWeb()`](https://nodejs.org/api/stream.html#streamreadabletowebstreamreadable-options)).
 
 The file type is detected by checking the [magic number](https://en.wikipedia.org/wiki/Magic_number_(programming)#Magic_numbers_in_files) of the buffer.
 
@@ -170,18 +121,21 @@ Or `undefined` when there is no match.
 
 #### stream
 
-Type: [Web `ReadableStream`](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream) or [Node.js `stream.Readable`](https://nodejs.org/api/stream.html#stream_class_stream_readable)
+Type: [Web `ReadableStream`](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream)
 
 A readable stream representing file data.
 
-### fileTypeFromBlob(blob)
+> [!TIP]
+> If you have a Node.js `stream.Readable`, convert it with [`Readable.toWeb()`](https://nodejs.org/api/stream.html#streamreadabletowebstreamreadable-options).
 
-Detect the file type of a [`Blob`](https://developer.mozilla.org/docs/Web/API/Blob),
+### fileTypeFromBlob(blob, options)
 
-[!TIP]
+Detect the file type of a [`Blob`](https://developer.mozilla.org/docs/Web/API/Blob).
+
+> [!TIP]
 > A [`File` object](https://developer.mozilla.org/docs/Web/API/File) is a `Blob` and can be passed in here.
 
-It will **stream** the underlying Blob, and required a [ReadableStreamBYOBReader](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStreamBYOBReader) which **require Node.js ≥ 20**.
+It will **stream** the underlying Blob.
 
 The file type is detected by checking the [magic number](https://en.wikipedia.org/wiki/Magic_number_(programming)#Magic_numbers_in_files) of the blob.
 
@@ -201,14 +155,14 @@ const blob = new Blob(['<?xml version="1.0" encoding="ISO-8859-1" ?>'], {
 });
 
 console.log(await fileTypeFromBlob(blob));
-//=> {ext: 'txt', mime: 'text/plain'}
+//=> {ext: 'xml', mime: 'application/xml'}
 ```
 
 #### blob
 
 Type: [`Blob`](https://developer.mozilla.org/en-US/docs/Web/API/Blob)
 
-### fileTypeFromTokenizer(tokenizer)
+### fileTypeFromTokenizer(tokenizer, options)
 
 Detect the file type from an `ITokenizer` source.
 
@@ -241,15 +195,15 @@ console.log(fileType);
 Or use [`@tokenizer/s3`](https://github.com/Borewit/tokenizer-s3) to determine the file type of a file stored on [Amazon S3](https://aws.amazon.com/s3):
 
 ```js
-import S3 from 'aws-sdk/clients/s3';
-import {makeTokenizer} from '@tokenizer/s3';
+import {S3Client} from '@aws-sdk/client-s3';
+import {makeChunkedTokenizerFromS3} from '@tokenizer/s3';
 import {fileTypeFromTokenizer} from 'file-type';
 
-// Initialize the S3 client
-const s3 = new S3();
+// Initialize S3 client
+const s3 = new S3Client();
 
 // Initialize the S3 tokenizer.
-const s3Tokenizer = await makeTokenizer(s3, {
+const s3Tokenizer = await makeChunkedTokenizerFromS3(s3, {
 	Bucket: 'affectlab',
 	Key: '1min_35sec.mp4'
 });
@@ -271,20 +225,22 @@ A file source implementing the [tokenizer interface](https://github.com/Borewit/
 
 Returns a `Promise` which resolves to the original readable stream argument, but with an added `fileType` property, which is an object like the one returned from `fileTypeFromFile()`.
 
-This method can be handy to put in between a stream, but it comes with a price.
+This method can be handy to put in a stream pipeline, but it comes with a price.
 Internally `stream()` builds up a buffer of `sampleSize` bytes, used as a sample, to determine the file type.
 The sample size impacts the file detection resolution.
 A smaller sample size will result in lower probability of the best file type detection.
 
-**Note:** When using Node.js, a `stream.Readable` may be provided as well.
+#### webStream
 
-#### readableStream
+Type: [Web `ReadableStream`](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream)
 
-Type: [`stream.Readable`](https://nodejs.org/api/stream.html#stream_class_stream_readable)
+The input stream.
 
 #### options
 
 Type: `object`
+
+Supports the following options in addition to the [general options](#options):
 
 ##### sampleSize
 
@@ -296,75 +252,153 @@ The sample size in bytes.
 #### Example
 
 ```js
-import got from 'got';
 import {fileTypeStream} from 'file-type';
 
 const url = 'https://upload.wikimedia.org/wikipedia/en/a/a9/Example.jpg';
 
-const stream1 = got.stream(url);
-const stream2 = await fileTypeStream(stream1, {sampleSize: 1024});
+const response = await fetch(url);
+const stream = await fileTypeStream(response.body, {sampleSize: 1024});
 
-if (stream2.fileType?.mime === 'image/jpeg') {
-	// stream2 can be used to stream the JPEG image (from the very beginning of the stream)
+if (stream.fileType?.mime === 'image/jpeg') {
+	// stream can be used to stream the JPEG image (from the very beginning of the stream)
 }
 ```
 
-#### readableStream
-
-Type: [`stream.Readable`](https://nodejs.org/api/stream.html#stream_class_stream_readable)
-
-The input stream.
-
 ### supportedExtensions
 
-Returns a `Set<string>` of supported file extensions.
+Returns a `Set<string>` of file extensions that can be detected.
 
 ### supportedMimeTypes
 
-Returns a `Set<string>` of supported MIME types.
+Returns a `Set<string>` of MIME types that can be detected.
+
+### Options
+
+#### customDetectors
+
+Array of custom file type detectors to run before default detectors.
+
+For example:
+
+```js
+import {fileTypeFromFile} from 'file-type';
+import {detectXml} from '@file-type/xml';
+
+const fileType = await fileTypeFromFile('sample.kml', {customDetectors: [detectXml]});
+console.log(fileType);
+```
+
+#### maxBufferSize
+
+Type: `number`\
+Default: `Infinity`
+
+Maximum size in bytes of an individual buffer allocated to read file content, or a stream lookahead request.
+Must be a positive safe integer or `Infinity`.
+
+File content can determine how much data a detector requests, for example through a field specifying the length of a metadata entry.
+This opt-in limit bounds the memory allocations needed to fulfill those reads, including reads made by custom detectors.
+Setting a finite cap can help prevent excessive read-buffer allocations driven by untrusted file content ([CWE-789: Memory Allocation with Excessive Size Value](https://cwe.mitre.org/data/definitions/789.html)).
+Built-in reads already have format-specific bounds; choose a finite cap to suit your application.
+An oversized request rejects detection with `strtok3.BufferSizeError`, which exposes `requestedSize` and `maxBufferSize`.
+During gzip content probing, this error is suppressed and detection falls back to `gz`; the cap still prevents the oversized allocation.
+
+```js
+const fileType = await fileTypeFromFile('sample.bin', {maxBufferSize: 64 * 1024 * 1024});
+```
+
+This is not a total memory limit.
+It does not cover buffers allocated directly by detectors or `fileTypeStream()` sampling.
+When using `fileTypeFromTokenizer()`, configure `maxBufferSize` on the input reader itself; this option does not override that reader’s limits.
+The built-in format-specific limits, including ZIP text-entry limits, apply independently of this option.
+
+For `FileTypeParser.toDetectionStream()`, configure detection options such as `maxBufferSize` through the parser constructor.
+The method only accepts stream options such as `sampleSize`.
+
+#### mpegOffsetTolerance
+
+Default: `0`
+
+Specifies the byte tolerance for locating the first MPEG audio frame (e.g. `.mp1`, `.mp2`, `.mp3`, `.aac`).
+
+Allows detection to handle slight sync offsets between the expected and actual frame start. Common in malformed or incorrectly muxed files, which, while technically invalid, do occur in the wild.
+
+A tolerance of 10 bytes covers most cases.
 
 ## Custom detectors
 
-A custom detector is a function that allows specifying custom detection mechanisms.
+Custom file type detectors are plugins designed to extend the default detection capabilities.
+They allow support for uncommon file types, non-binary formats, or customized detection behavior.
 
-An iterable of detectors can be provided via the `fileTypeOptions` argument for the `FileTypeParser` constructor.
-In Node.js, you should use `NodeFileTypeParser`, which extends `FileTypeParser` and provides access to Node.js specific functions.
+Detectors can be added via the constructor options or by directly modifying `FileTypeParser#detectors`.
+Detectors provided through the constructor are executed before the default ones.
 
-The detectors are called before the default detections in the provided order.
+> [!NOTE]
+> Not safe for concurrent use. Create a new instance per call if you need concurrency.
 
-Custom detectors can be used to add new `FileTypeResults` or to modify return behaviour of existing `FileTypeResult` detections.
-
-If the detector returns `undefined`, there are 2 possible scenarios:
-
-1. The detector has not read from the tokenizer, it will be proceeded with the next available detector.
-2. The detector has read from the tokenizer (`tokenizer.position` has been increased).
-	In that case no further detectors will be executed and the final conclusion is that file-type returns undefined.
-	Note that this an exceptional scenario, as the detector takes the opportunity from any other detector to determine the file type.
-
-Example detector array which can be extended and provided to each public method via the `fileTypeOptions` argument:
+### Example adding a detector
 
 ```js
-import {FileTypeParser} from 'file-type'; // or `NodeFileTypeParser` in Node.js
+import {FileTypeParser} from 'file-type';
+import {detectXml} from '@file-type/xml';
 
-const customDetectors = [
-	async tokenizer => {
-		const unicornHeader = [85, 78, 73, 67, 79, 82, 78]; // 'UNICORN' as decimal string
+const parser = new FileTypeParser({customDetectors: [detectXml]});
+const fileType = await parser.fromFile('sample.kml');
+console.log(fileType);
+```
 
-		const buffer = new Uint8Array(7);
+### Available third-party file-type detectors
+
+- [@file-type/av](https://github.com/Borewit/file-type-av): Improves detection of audio and video file formats, with accurate differentiation between the two
+- [@file-type/cfbf](https://github.com/Borewit/file-type-cfbf): Detects Compound File Binary Format (CFBF) based formats, such as Office 97–2003 documents and `.msi`.
+- [@file-type/pdf](https://github.com/Borewit/file-type-pdf): Detects PDF based file types, such as Adobe Illustrator
+- [@file-type/xml](https://github.com/Borewit/file-type-xml): Detects common XML file types, such as GLM, KML, MusicXML, RSS, SVG, and XHTML
+
+### Detector execution flow
+
+If a detector returns `undefined`, the following rules apply:
+
+1. **No Tokenizer Interaction**: If the detector does not modify the tokenizer's position, the next detector in the sequence is executed.
+2. **Tokenizer Interaction**: If the detector modifies the tokenizer's position (`tokenizer.position` is advanced), no further detectors are executed. In this case, the file type remains `undefined`, as subsequent detectors cannot evaluate the content. This is an exceptional scenario, as it prevents any other detectors from determining the file type.
+
+### Writing your own custom detector
+
+Below is an example of a custom detector. This can be passed to the `FileTypeParser` via the `customDetectors` option.
+
+```js
+import {FileTypeParser} from 'file-type';
+
+const unicornDetector = {
+	id: 'unicorn', // May be used to recognize the detector in the detector list
+	async detect(tokenizer) {
+		const unicornHeader = [85, 78, 73, 67, 79, 82, 78]; // "UNICORN" in ASCII decimal
+
+		const buffer = new Uint8Array(unicornHeader.length);
 		await tokenizer.peekBuffer(buffer, {length: unicornHeader.length, mayBeLess: true});
-
 		if (unicornHeader.every((value, index) => value === buffer[index])) {
 			return {ext: 'unicorn', mime: 'application/unicorn'};
 		}
 
 		return undefined;
-	},
-];
+	}
+}
 
-const buffer = new Uint8Array(new TextEncoder().encode('UNICORN'));
-const parser = new FileTypeParser({customDetectors}); // `NodeFileTypeParser({customDetectors})` in Node.js
+const buffer = new Uint8Array([85, 78, 73, 67, 79, 82, 78]);
+const parser = new FileTypeParser({customDetectors: [unicornDetector]});
 const fileType = await parser.fromBuffer(buffer);
-console.log(fileType);
+console.log(fileType); // {ext: 'unicorn', mime: 'application/unicorn'}
+```
+
+```ts
+/**
+@param tokenizer - The [tokenizer](https://github.com/Borewit/strtok3#tokenizer) used to read file content.
+@param fileType - The file type detected by standard or previous custom detectors, or `undefined` if no match is found.
+@returns The detected file type, or `undefined` if no match is found.
+*/
+export type Detector = {
+	id: string;
+	detect: (tokenizer: ITokenizer, fileType?: FileTypeResult) => Promise<FileTypeResult | undefined>;
+};
 ```
 
 ## Abort signal
@@ -372,11 +406,11 @@ console.log(fileType);
 Some async operations can be aborted by passing an [`AbortSignal`](https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal) to the `FileTypeParser` constructor.
 
 ```js
-import {FileTypeParser} from 'file-type'; // or `NodeFileTypeParser` in Node.js
+import {FileTypeParser} from 'file-type';
 
-const abortController = new AbortController()
+const abortController = new AbortController();
 
-const parser = new FileTypeParser({abortSignal: abortController.signal});
+const parser = new FileTypeParser({signal: abortController.signal});
 
 const promise = parser.fromStream(blob.stream());
 
@@ -384,6 +418,8 @@ abortController.abort(); // Abort file-type reading from the Blob stream.
 ```
 
 ## Supported file types
+
+MIME media subtypes prefixed with `x-ft-` are custom and defined by us. They are neither formally registered with IANA nor based on any informal conventions.
 
 - [`3g2`](https://en.wikipedia.org/wiki/3GP_and_3G2#3G2) - Multimedia container format defined by the 3GPP2 for 3G CDMA2000 multimedia services
 - [`3gp`](https://en.wikipedia.org/wiki/3GP_and_3G2#3GP) - Multimedia container format defined by the Third Generation Partnership Project (3GPP) for 3G UMTS multimedia services
@@ -393,7 +429,6 @@ abortController.abort(); // Abort file-type reading from the Blob stream.
 - [`aac`](https://en.wikipedia.org/wiki/Advanced_Audio_Coding) - Advanced Audio Coding
 - [`ac3`](https://www.atsc.org/standard/a522012-digital-audio-compression-ac-3-e-ac-3-standard-12172012/) - ATSC A/52 Audio File
 - [`ace`](https://en.wikipedia.org/wiki/ACE_(compressed_file_format)) - ACE archive
-- [`ai`](https://en.wikipedia.org/wiki/Adobe_Illustrator_Artwork) - Adobe Illustrator Artwork
 - [`aif`](https://en.wikipedia.org/wiki/Audio_Interchange_File_Format) - Audio Interchange file
 - [`alias`](https://en.wikipedia.org/wiki/Alias_%28Mac_OS%29) - macOS Alias file
 - [`amr`](https://en.wikipedia.org/wiki/Adaptive_Multi-Rate_audio_codec) - Adaptive Multi-Rate audio codec
@@ -414,6 +449,7 @@ abortController.abort(); // Abort file-type reading from the Blob stream.
 - [`bpg`](https://bellard.org/bpg/) - Better Portable Graphics file
 - [`bz2`](https://en.wikipedia.org/wiki/Bzip2) - Archive file
 - [`cab`](https://en.wikipedia.org/wiki/Cabinet_(file_format)) - Cabinet file
+- [`caf`](https://developer.apple.com/library/archive/documentation/MusicAudio/Reference/CAFSpec/) - Apple Core Audio Format
 - [`cfb`](https://en.wikipedia.org/wiki/Compound_File_Binary_Format) - Compound File Binary Format
 - [`chm`](https://en.wikipedia.org/wiki/Microsoft_Compiled_HTML_Help) - Microsoft Compiled HTML Help
 - [`class`](https://en.wikipedia.org/wiki/Java_class_file) - Java class file
@@ -422,11 +458,17 @@ abortController.abort(); // Abort file-type reading from the Blob stream.
 - [`cr3`](https://fileinfo.com/extension/cr3) - Canon Raw image file (v3)
 - [`crx`](https://developer.chrome.com/extensions/crx) - Google Chrome extension
 - [`cur`](https://en.wikipedia.org/wiki/ICO_(file_format)) - Icon file
+- [`dat`](https://en.wikipedia.org/wiki/Windows_Registry) - Windows registry hive file
 - [`dcm`](https://en.wikipedia.org/wiki/DICOM#Data_format) - DICOM Image File
 - [`deb`](https://en.wikipedia.org/wiki/Deb_(file_format)) - Debian package
+- [`dff`](https://en.wikipedia.org/wiki/Direct_Stream_Digital#DSD_Interchange_File_Format) - Direct Stream Digital Interchange File Format (DSDIFF)
 - [`dmg`](https://en.wikipedia.org/wiki/Apple_Disk_Image) - Apple Disk Image
 - [`dng`](https://en.wikipedia.org/wiki/Digital_Negative) - Adobe Digital Negative image file
+- [`docm`](https://en.wikipedia.org/wiki/List_of_Microsoft_Office_filename_extensions) - Microsoft Word macro-enabled document
 - [`docx`](https://en.wikipedia.org/wiki/Office_Open_XML) - Microsoft Word document
+- [`dotm`](https://en.wikipedia.org/wiki/List_of_Microsoft_Office_filename_extensions) - Microsoft Word macro-enabled template
+- [`dotx`](https://en.wikipedia.org/wiki/List_of_Microsoft_Office_filename_extensions) - Microsoft Word template
+- [`drc`](https://en.wikipedia.org/wiki/Zstandard) - Google's Draco 3D Data Compression
 - [`dsf`](https://dsd-guide.com/sites/default/files/white-papers/DSFFileFormatSpec_E.pdf) - Sony DSD Stream File (DSF)
 - [`dwg`](https://en.wikipedia.org/wiki/.dwg) - Autodesk CAD file
 - [`elf`](https://en.wikipedia.org/wiki/Executable_and_Linkable_Format) - Unix Executable and Linkable Format
@@ -451,18 +493,23 @@ abortController.abort(); // Abort file-type reading from the Blob stream.
 - [`ico`](https://en.wikipedia.org/wiki/ICO_(file_format)) - Windows icon file
 - [`ics`](https://en.wikipedia.org/wiki/ICalendar#Data_format) - iCalendar
 - [`indd`](https://en.wikipedia.org/wiki/Adobe_InDesign#File_format) - Adobe InDesign document
+- [`iso`](https://en.wikipedia.org/wiki/ISO_9660) - ISO 9660 disc image
 - [`it`](https://wiki.openmpt.org/Manual:_Module_formats#The_Impulse_Tracker_format_.28.it.29) - Audio module format: Impulse Tracker
 - [`j2c`](https://en.wikipedia.org/wiki/JPEG_2000) - JPEG 2000
+- [`jar`](https://en.wikipedia.org/wiki/JAR_(file_format)) - Java archive
 - [`jls`](https://en.wikipedia.org/wiki/Lossless_JPEG#JPEG-LS) - Lossless/near-lossless compression standard for continuous-tone images
+- [`jmp`](https://en.wikipedia.org/wiki/JMP_(statistical_software)) - JMP data file format by SAS Institute
 - [`jp2`](https://en.wikipedia.org/wiki/JPEG_2000) - JPEG 2000
 - [`jpg`](https://en.wikipedia.org/wiki/JPEG) - Joint Photographic Experts Group image
 - [`jpm`](https://en.wikipedia.org/wiki/JPEG_2000) - JPEG 2000
 - [`jpx`](https://en.wikipedia.org/wiki/JPEG_2000) - JPEG 2000
 - [`jxl`](https://en.wikipedia.org/wiki/JPEG_XL) - JPEG XL image format
 - [`jxr`](https://en.wikipedia.org/wiki/JPEG_XR) - Joint Photographic Experts Group extended range
+- [`key`](https://en.wikipedia.org/wiki/Keynote_(presentation_software)) - Apple Keynote presentation
 - [`ktx`](https://www.khronos.org/opengles/sdk/tools/KTX/file_format_spec/) - OpenGL and OpenGL ES textures
 - [`lnk`](https://en.wikipedia.org/wiki/Shortcut_%28computing%29#Microsoft_Windows) - Microsoft Windows file shortcut
 - [`lz`](https://en.wikipedia.org/wiki/Lzip) - Archive file
+- [`lz4`](https://en.wikipedia.org/wiki/LZ4_(compression_algorithm)) - Compressed archive created by one of a variety of LZ4 compression utilities
 - [`lzh`](https://en.wikipedia.org/wiki/LHA_(file_format)) - LZH archive
 - [`m4a`](https://en.wikipedia.org/wiki/M4A) - Audio-only MPEG-4 files
 - [`m4b`](https://en.wikipedia.org/wiki/M4B) - Audiobook and podcast MPEG-4 files, which also contain metadata including chapter markers, images, and hyperlinks
@@ -485,6 +532,8 @@ abortController.abort(); // Abort file-type reading from the Blob stream.
 - [`mxf`](https://en.wikipedia.org/wiki/Material_Exchange_Format) - Material Exchange Format
 - [`nef`](https://www.nikonusa.com/en/learn-and-explore/a/products-and-innovation/nikon-electronic-format-nef.html) - Nikon Electronic Format image file
 - [`nes`](https://fileinfo.com/extension/nes) - Nintendo NES ROM
+- [`numbers`](https://en.wikipedia.org/wiki/Numbers_(spreadsheet)) - Apple Numbers spreadsheet
+- [`odg`](https://en.wikipedia.org/wiki/OpenDocument) - OpenDocument for drawing
 - [`odp`](https://en.wikipedia.org/wiki/OpenDocument) - OpenDocument for presentations
 - [`ods`](https://en.wikipedia.org/wiki/OpenDocument) - OpenDocument for spreadsheets
 - [`odt`](https://en.wikipedia.org/wiki/OpenDocument) - OpenDocument for word processing
@@ -496,30 +545,45 @@ abortController.abort(); // Abort file-type reading from the Blob stream.
 - [`opus`](https://en.wikipedia.org/wiki/Opus_(audio_format)) - Audio file
 - [`orf`](https://en.wikipedia.org/wiki/ORF_format) - Olympus Raw image file
 - [`otf`](https://en.wikipedia.org/wiki/OpenType) - OpenType font
+- [`otg`](https://en.wikipedia.org/wiki/OpenDocument_technical_specification#Templates) - OpenDocument template for drawing
+- [`otp`](https://en.wikipedia.org/wiki/OpenDocument_technical_specification#Templates) - OpenDocument template for presentations
+- [`ots`](https://en.wikipedia.org/wiki/OpenDocument_technical_specification#Templates) - OpenDocument template for spreadsheets
+- [`ott`](https://en.wikipedia.org/wiki/OpenDocument_technical_specification#Templates) - OpenDocument template for word processing
+- [`pages`](https://en.wikipedia.org/wiki/Pages_(word_processor)) - Apple Pages document
 - [`parquet`](https://en.wikipedia.org/wiki/Apache_Parquet) - Apache Parquet
 - [`pcap`](https://wiki.wireshark.org/Development/LibpcapFileFormat) - Libpcap File Format
 - [`pdf`](https://en.wikipedia.org/wiki/Portable_Document_Format) - Portable Document Format
 - [`pgp`](https://en.wikipedia.org/wiki/Pretty_Good_Privacy) - Pretty Good Privacy
 - [`png`](https://en.wikipedia.org/wiki/Portable_Network_Graphics) - Portable Network Graphics
-- [`pptx`](https://en.wikipedia.org/wiki/Office_Open_XML) - Microsoft Powerpoint document
-- [`ps`](https://en.wikipedia.org/wiki/Postscript) - Postscript
+- [`potm`](https://en.wikipedia.org/wiki/List_of_Microsoft_Office_filename_extensions) - Microsoft PowerPoint macro-enabled template
+- [`potx`](https://en.wikipedia.org/wiki/List_of_Microsoft_Office_filename_extensions) - Microsoft PowerPoint template
+- [`ppsm`](https://en.wikipedia.org/wiki/List_of_Microsoft_Office_filename_extensions#PowerPoint) - Office PowerPoint 2007 macro-enabled slide show
+- [`ppsx`](https://en.wikipedia.org/wiki/List_of_Microsoft_Office_filename_extensions#PowerPoint) - Office PowerPoint 2007 slide show
+- [`pptm`](https://en.wikipedia.org/wiki/List_of_Microsoft_Office_filename_extensions) - Microsoft PowerPoint macro-enabled document
+- [`pptx`](https://en.wikipedia.org/wiki/Office_Open_XML) - Microsoft PowerPoint document
+- [`ps`](https://en.wikipedia.org/wiki/Postscript) - PostScript
 - [`psd`](https://en.wikipedia.org/wiki/Adobe_Photoshop#File_format) - Adobe Photoshop document
 - [`pst`](https://en.wikipedia.org/wiki/Personal_Storage_Table) - Personal Storage Table file
 - [`qcp`](https://en.wikipedia.org/wiki/QCP) - Tagged and chunked data
 - [`raf`](https://en.wikipedia.org/wiki/Raw_image_format) - Fujifilm RAW image file
 - [`rar`](https://en.wikipedia.org/wiki/RAR_(file_format)) - Archive file
+- [`reg`](https://en.wikipedia.org/wiki/Windows_Registry) - Windows registry (entries) file format
+- [`rm`](https://en.wikipedia.org/wiki/RealMedia) - RealMedia
 - [`rpm`](https://fileinfo.com/extension/rpm) - Red Hat Package Manager file
 - [`rtf`](https://en.wikipedia.org/wiki/Rich_Text_Format) - Rich Text Format
 - [`rw2`](https://en.wikipedia.org/wiki/Raw_image_format) - Panasonic RAW image file
 - [`s3m`](https://wiki.openmpt.org/Manual:_Module_formats#The_ScreamTracker_3_format_.28.s3m.29) - Audio module format: ScreamTracker 3
+- [`sav`](https://en.wikipedia.org/wiki/SPSS) - SPSS Statistical Data File
 - [`shp`](https://en.wikipedia.org/wiki/Shapefile) - Geospatial vector data format
 - [`skp`](https://en.wikipedia.org/wiki/SketchUp) - SketchUp
 - [`spx`](https://en.wikipedia.org/wiki/Ogg) - Audio file
 - [`sqlite`](https://www.sqlite.org/fileformat2.html) - SQLite file
-- [`stl`](https://en.wikipedia.org/wiki/STL_(file_format)) - Standard Tesselated Geometry File Format (ASCII only)
+- [`stl`](https://en.wikipedia.org/wiki/STL_(file_format)) - Standard Tessellated Geometry File Format (ASCII only)
 - [`swf`](https://en.wikipedia.org/wiki/SWF) - Adobe Flash Player file
-- [`tar`](https://en.wikipedia.org/wiki/Tar_(computing)#File_format) - Tarball archive file
+- [`tar`](https://en.wikipedia.org/wiki/Tar_(computing)#File_format) - Tape archive or tarball
+- [`tar.gz`](https://en.wikipedia.org/wiki/Gzip) - Gzipped tape archive (tarball)
 - [`tif`](https://en.wikipedia.org/wiki/Tagged_Image_File_Format) - Tagged Image file
+- [`ttc`](https://en.wikipedia.org/wiki/TrueType#TrueType_Collection) - TrueType Collection font
 - [`ttf`](https://en.wikipedia.org/wiki/TrueType) - TrueType font
 - [`vcf`](https://en.wikipedia.org/wiki/VCard) - vCard
 - [`voc`](https://wiki.multimedia.cx/index.php/Creative_Voice) - Creative Voice File
@@ -533,7 +597,10 @@ abortController.abort(); // Abort file-type reading from the Blob stream.
 - [`woff2`](https://en.wikipedia.org/wiki/Web_Open_Font_Format) - Web Open Font Format
 - [`wv`](https://en.wikipedia.org/wiki/WavPack) - WavPack
 - [`xcf`](https://en.wikipedia.org/wiki/XCF_(file_format)) - eXperimental Computing Facility
+- [`xlsm`](https://en.wikipedia.org/wiki/List_of_Microsoft_Office_filename_extensions) - Microsoft Excel macro-enabled document
 - [`xlsx`](https://en.wikipedia.org/wiki/Office_Open_XML) - Microsoft Excel document
+- [`xltm`](https://en.wikipedia.org/wiki/List_of_Microsoft_Office_filename_extensions) - Microsoft Excel macro-enabled template
+- [`xltx`](https://en.wikipedia.org/wiki/List_of_Microsoft_Office_filename_extensions) - Microsoft Excel template
 - [`xm`](https://wiki.openmpt.org/Manual:_Module_formats#The_FastTracker_2_format_.28.xm.29) - Audio module format: FastTracker 2
 - [`xml`](https://en.wikipedia.org/wiki/XML) - eXtensible Markup Language
 - [`xpi`](https://en.wikipedia.org/wiki/XPInstall) - XPInstall file
@@ -541,30 +608,20 @@ abortController.abort(); // Abort file-type reading from the Blob stream.
 - [`zip`](https://en.wikipedia.org/wiki/Zip_(file_format)) - Archive file
 - [`zst`](https://en.wikipedia.org/wiki/Zstandard) - Archive file
 
+ISO 9660 requires random-access input or `fileTypeStream()` with `sampleSize >= 32_774`; `fileTypeFromStream()` is unsupported.
+
+When `[Content_Types].xml` cannot be reached — it may trail the content entries, and only so much of what precedes it is scanned — the type is guessed from the archive's directory names: `word/`, `xl/` and `ppt/` are reported as `docx`, `xlsx` and `pptx`. Macro-enabled and template variants are therefore reported as their base type, and a non-OOXML archive containing one of those directories is reported as OOXML.
+
 *[Pull requests](.github/pull_request_template.md) are welcome for additional commonly used file types.*
 
-The following file types will not be accepted:
-- [MS-CFB: Microsoft Compound File Binary File Format based formats](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-cfb/53989ce4-7b05-4f8d-829b-d08d6148375b), too old and difficult to parse:
+The following file types will not be accepted, but most of them are supported by [third-party detectors](#available-third-party-file-type-detectors).
+- [MS-CFB: Microsoft Compound File Binary File Format based formats](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-cfb/53989ce4-7b05-4f8d-829b-d08d6148375b)
 	- `.doc` - Microsoft Word 97-2003 Document
 	- `.xls` - Microsoft Excel 97-2003 Document
-	- `.ppt` - Microsoft PowerPoint97-2003 Document
+	- `.ppt` - Microsoft PowerPoint 97-2003 Document
 	- `.msi` - Microsoft Windows Installer
 - `.csv` - [Reason.](https://github.com/sindresorhus/file-type/issues/264#issuecomment-568439196)
-- `.svg` - Detecting it requires a full-blown parser. Check out [`is-svg`](https://github.com/sindresorhus/is-svg) for something that mostly works.
-
-#### tokenizer
-
-Type: [`ITokenizer`](https://github.com/Borewit/strtok3#tokenizer)
-
-Usable as source of the examined file.
-
-#### fileType
-
-Type: `FileTypeResult`
-
-An object having an `ext` (extension) and `mime` (mime type) property.
-
-Detected by the standard detections or a previous custom detection. Undefined if no matching fileTypeResult could be found.
+- `.svg`
 
 ## Related
 
