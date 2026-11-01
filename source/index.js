@@ -461,6 +461,34 @@ export class FileTypeParser {
 
 		await tokenizer.peekBuffer(this.buffer, {length: 32, mayBeLess: true});
 
+		// Apple Disk Image (UDIF): identified by its 512-byte `koly` trailer, since the file starts with the
+		// first compressed chunk and so otherwise looks like zlib, bzip2, xz (LZMA) or nothing (LZFSE, raw).
+		// Only attempted for random-access inputs with a known size.
+		const udifTrailerLength = 512;
+		if (
+			tokenizer.supportsRandomAccess()
+			&& !hasUnknownFileSize(tokenizer)
+			&& tokenizer.fileInfo.size >= udifTrailerLength
+		) {
+			const udifTrailer = new Uint8Array(udifTrailerLength);
+			await tokenizer.peekBuffer(udifTrailer, {
+				position: tokenizer.fileInfo.size - udifTrailerLength,
+				length: udifTrailerLength,
+				mayBeLess: true,
+			});
+
+			if (
+				checkBytes(udifTrailer, stringToBytes('koly'))
+				&& Token.UINT32_BE.get(udifTrailer, 4) === 4 // Version
+				&& Token.UINT32_BE.get(udifTrailer, 8) === udifTrailerLength // Header size
+			) {
+				return {
+					ext: 'dmg',
+					mime: 'application/x-apple-diskimage',
+				};
+			}
+		}
+
 		// -- 2-byte signatures --
 
 		if (this.check([0x42, 0x4D])) {

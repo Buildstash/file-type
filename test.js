@@ -531,6 +531,46 @@ test('.fileTypeStream() only detects ISO 9660 once sampleSize reaches its Volume
 	});
 });
 
+// UDIF disk image whose first chunk is LZMA (`hdiutil -format ULMO`), so its first bytes are an xz header
+function createUdifDiskImage({version = 4, headerSize = 512} = {}) {
+	const xzHeader = Uint8Array.from([0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00, 0x00, 0x04]);
+	const trailer = new Uint8Array(512);
+	const view = new DataView(trailer.buffer);
+	trailer.set(new TextEncoder().encode('koly'), 0);
+	view.setUint32(4, version);
+	view.setUint32(8, headerSize);
+	return Buffer.concat([Buffer.from(xzHeader), Buffer.alloc(8192), Buffer.from(trailer)]);
+}
+
+test('Detects DMG from its koly trailer when the first chunk looks like another format', async () => {
+	const dmg = createUdifDiskImage();
+	const expected = {
+		ext: 'dmg',
+		mime: 'application/x-apple-diskimage',
+	};
+
+	assert.deepEqual(await fileTypeFromBuffer(dmg), expected);
+	assert.deepEqual(await fileTypeFromBlob(new Blob([dmg])), expected);
+	assert.deepEqual(await fileTypeFromFile(await createTemporaryTestFile(dmg)), expected);
+});
+
+test('Ignores the DMG koly trailer for streams, which cannot read the end of the file', async () => {
+	assert.deepEqual(await fileTypeFromStream(new Blob([createUdifDiskImage()]).stream()), {
+		ext: 'xz',
+		mime: 'application/x-xz',
+	});
+});
+
+test('Does not detect DMG from a koly trailer with an unexpected version or header size', async () => {
+	for (const options of [{version: 3}, {headerSize: 256}]) {
+		// eslint-disable-next-line no-await-in-loop
+		assert.deepEqual(await fileTypeFromBuffer(createUdifDiskImage(options)), {
+			ext: 'xz',
+			mime: 'application/x-xz',
+		});
+	}
+});
+
 test('.fileTypeStream() preserves large caller-provided sampleSize values', async () => {
 	const id3HeaderLength = 2 * 1024 * 1024;
 	const id3Header = Uint8Array.from([
