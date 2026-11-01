@@ -8123,6 +8123,158 @@ test('Still detects APK in over-limit ZIP archives when classes.dex appears befo
 	});
 });
 
+// Jarsigner puts its manifest and signature files first, ahead of the Android markers
+const jarSignatureEntries = [
+	{filename: 'META-INF/MANIFEST.MF', compressedData: new TextEncoder().encode('Manifest-Version: 1.0\n')},
+	{filename: 'META-INF/CERT.SF'},
+	{filename: 'META-INF/CERT.RSA'},
+];
+
+test('Detects v1-signed APK when META-INF/MANIFEST.MF comes before classes.dex', async () => {
+	const zip = createZipArchive([
+		...jarSignatureEntries,
+		{filename: 'AndroidManifest.xml'},
+		{filename: 'classes.dex', compressedData: new TextEncoder().encode('dex\n035\0')},
+	]);
+
+	assert.deepEqual(await fileTypeFromBuffer(zip), {
+		ext: 'apk',
+		mime: 'application/vnd.android.package-archive',
+	});
+	assert.deepEqual(await fileTypeFromBlob(new Blob([zip])), {
+		ext: 'apk',
+		mime: 'application/vnd.android.package-archive',
+	});
+	assert.deepEqual(await fileTypeFromStream(createBufferedWebStream(zip, 8)), {
+		ext: 'apk',
+		mime: 'application/vnd.android.package-archive',
+	});
+});
+
+test('Detects jarsigned AAB when META-INF/MANIFEST.MF comes before base/dex/classes.dex', async () => {
+	const zip = createZipArchive([
+		...jarSignatureEntries,
+		{filename: 'BUNDLE-METADATA/com.android.tools.build.libraries/dependencies.pb'},
+		{filename: 'base/manifest/AndroidManifest.xml'},
+		{filename: 'base/dex/classes.dex', compressedData: new TextEncoder().encode('dex\n035\0')},
+	]);
+
+	assert.deepEqual(await fileTypeFromBuffer(zip), {
+		ext: 'apk',
+		mime: 'application/vnd.android.package-archive',
+	});
+	assert.deepEqual(await fileTypeFromBlob(new Blob([zip])), {
+		ext: 'apk',
+		mime: 'application/vnd.android.package-archive',
+	});
+});
+
+test('Detects jarsigned AAB by BundleConfig.pb when its dex files are beyond the ZIP entry count limit', async () => {
+	const assetEntries = Array.from({length: 1100}, (_, index) => ({filename: `base/assets/asset-${index}.bin`}));
+	const zip = createZipArchive([
+		...jarSignatureEntries,
+		{filename: 'BundleConfig.pb'},
+		...assetEntries,
+		{filename: 'base/dex/classes.dex', compressedData: new TextEncoder().encode('dex\n035\0')},
+	]);
+
+	assert.deepEqual(await fileTypeFromBuffer(zip), {
+		ext: 'apk',
+		mime: 'application/vnd.android.package-archive',
+	});
+});
+
+// Like jarsigner output: every entry has a data descriptor, and the central directory holds the real sizes
+function createDataDescriptorZipArchive(entries) {
+	const localFiles = [];
+	const centralDirectoryEntries = [];
+	let offset = 0;
+
+	for (const {filename, compressedData = new Uint8Array(0)} of entries) {
+		const filenameBytes = new TextEncoder().encode(filename);
+		const localFile = createZipDataDescriptorFile({filename, compressedData});
+		localFiles.push(localFile);
+
+		const centralDirectoryEntry = new Uint8Array(46 + filenameBytes.length);
+		const view = new DataView(centralDirectoryEntry.buffer);
+		view.setUint32(0, 0x02_01_4B_50, true);
+		view.setUint16(4, 20, true);
+		view.setUint16(6, 20, true);
+		view.setUint16(8, 0x08, true);
+		view.setUint32(20, compressedData.length, true);
+		view.setUint32(24, compressedData.length, true);
+		view.setUint16(28, filenameBytes.length, true);
+		view.setUint32(42, offset, true);
+		centralDirectoryEntry.set(filenameBytes, 46);
+		centralDirectoryEntries.push(Buffer.from(centralDirectoryEntry));
+		offset += localFile.length;
+	}
+
+	const centralDirectory = Buffer.concat(centralDirectoryEntries);
+	const endOfCentralDirectory = new Uint8Array(22);
+	const view = new DataView(endOfCentralDirectory.buffer);
+	view.setUint32(0, 0x06_05_4B_50, true);
+	view.setUint16(8, entries.length, true);
+	view.setUint16(10, entries.length, true);
+	view.setUint32(12, centralDirectory.length, true);
+	view.setUint32(16, offset, true);
+
+	return Buffer.concat([...localFiles, centralDirectory, Buffer.from(endOfCentralDirectory)]);
+}
+
+test('Detects jarsigned AAB from the central directory when a large data-descriptor entry stops the scan before its markers', async () => {
+	const zip = createDataDescriptorZipArchive([
+		...jarSignatureEntries,
+		{filename: 'BUNDLE-METADATA/com.android.tools.build.debugsymbols/arm64-v8a/libil2cpp.so.sym', compressedData: Buffer.alloc(maximumZipTextEntrySizeInBytes + 1, 0x41)},
+		{filename: 'BundleConfig.pb'},
+		{filename: 'base/dex/classes.dex', compressedData: new TextEncoder().encode('dex\n035\0')},
+	]);
+
+	assert.deepEqual(await fileTypeFromBuffer(zip), {
+		ext: 'apk',
+		mime: 'application/vnd.android.package-archive',
+	});
+	assert.deepEqual(await fileTypeFromBlob(new Blob([zip])), {
+		ext: 'apk',
+		mime: 'application/vnd.android.package-archive',
+	});
+	assert.deepEqual(await fileTypeFromFile(await createTemporaryTestFile(zip)), {
+		ext: 'apk',
+		mime: 'application/vnd.android.package-archive',
+	});
+});
+
+test('Still detects JAR when a large data-descriptor entry stops the scan and the central directory has no Android markers', async () => {
+	const zip = createDataDescriptorZipArchive([
+		...jarSignatureEntries,
+		{filename: 'lib/large.bin', compressedData: Buffer.alloc(maximumZipTextEntrySizeInBytes + 1, 0x41)},
+		{filename: 'com/example/Main.class'},
+	]);
+
+	assert.deepEqual(await fileTypeFromBuffer(zip), {
+		ext: 'jar',
+		mime: 'application/java-archive',
+	});
+});
+
+test('Still detects JAR when META-INF/MANIFEST.MF is followed by entries without Android markers', async () => {
+	const zip = createZipArchive([
+		...jarSignatureEntries,
+		{filename: 'com/example/Main.class'},
+		{filename: 'word/document.xml'},
+		{filename: 'mimetype', compressedData: new TextEncoder().encode('application/epub+zip')},
+	]);
+
+	assert.deepEqual(await fileTypeFromBuffer(zip), {
+		ext: 'jar',
+		mime: 'application/java-archive',
+	});
+	assert.deepEqual(await fileTypeFromStream(createBufferedWebStream(zip, 8)), {
+		ext: 'jar',
+		mime: 'application/java-archive',
+	});
+});
+
 test('Falls back to zip when classes.dex first appears after the ZIP entry count limit', async () => {
 	const zip = createZipArchiveWithEntryAtIndex(1025, 1024, {
 		filename: 'classes.dex',

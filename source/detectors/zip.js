@@ -285,8 +285,38 @@ function getOpenXmlMimeTypeFromContentTypesXml(xmlContent) {
 	return truncatedContent.slice(firstQuotePosition + 1);
 }
 
+// Android markers: `classes*.dex` in APKs (and under `base/dex/` in AABs), `BundleConfig.pb` at the root of AABs
+function getAndroidFileTypeFromZipEntry(filename) {
+	if (filename === 'BundleConfig.pb' || /classes\d*\.dex/v.test(filename)) {
+		return {
+			ext: 'apk',
+			mime: 'application/vnd.android.package-archive',
+		};
+	}
+}
+
+// Jarsigner also rewrites entries with data descriptors, so the forward scan can give up on a large entry
+// (e.g. AAB debug symbols) before reaching the Android markers; the central directory lists every name cheaply
+async function getAndroidFileTypeFromCentralDirectory(tokenizer) {
+	try {
+		const entries = await new ZipHandler(tokenizer).readCentralDirectory();
+		for (const entry of entries ?? []) {
+			const androidFileType = getAndroidFileTypeFromZipEntry(entry.filename);
+			if (androidFileType) {
+				return androidFileType;
+			}
+		}
+	} catch {
+		// Unreadable central directory, so it stays a JAR
+	}
+}
+
 export async function detectZip(tokenizer) {
 	let fileType;
+	let isLocalScanIncomplete = false;
+	// Signing with jarsigner moves META-INF/MANIFEST.MF to the front of signed AABs and v1-signed APKs,
+	// so seeing it only makes the archive a JAR candidate; the scan carries on looking for Android markers
+	let hasJarManifestEntry = false;
 	const openXmlState = createOpenXmlZipDetectionState();
 	const iWorkState = createIWorkZipDetectionState();
 
@@ -306,6 +336,16 @@ export async function detectZip(tokenizer) {
 		}).unzip(zipHeader => {
 			updateOpenXmlZipDetectionStateFromFilename(openXmlState, zipHeader.filename);
 			updateIWorkZipDetectionStateFromFilename(iWorkState, zipHeader.filename);
+
+			if (hasJarManifestEntry) {
+				const androidFileType = getAndroidFileTypeFromZipEntry(zipHeader.filename);
+				if (androidFileType) {
+					fileType = androidFileType;
+					return {stop: true};
+				}
+
+				return {};
+			}
 
 			// Early exit for Keynote or Numbers when markers are definitive
 			if (iWorkState.hasDocumentEntry && (iWorkState.hasMasterSlideEntry || iWorkState.hasTablesEntry)) {
@@ -335,13 +375,8 @@ export async function detectZip(tokenizer) {
 						stop: true,
 					};
 				case 'META-INF/MANIFEST.MF':
-					fileType = {
-						ext: 'jar',
-						mime: 'application/java-archive',
-					};
-					return {
-						stop: true,
-					};
+					hasJarManifestEntry = true;
+					return {};
 				case 'mimetype':
 					if (!canReadZipEntryForDetection(zipHeader, maximumZipTextEntrySizeInBytes)) {
 						return {};
@@ -381,22 +416,24 @@ export async function detectZip(tokenizer) {
 					};
 				}
 
-				default:
-					if (/classes\d*\.dex/v.test(zipHeader.filename)) {
-						fileType = {
-							ext: 'apk',
-							mime: 'application/vnd.android.package-archive',
-						};
+				default: {
+					const androidFileType = getAndroidFileTypeFromZipEntry(zipHeader.filename);
+					if (androidFileType) {
+						fileType = androidFileType;
 						return {stop: true};
 					}
 
 					return {};
+				}
 			}
 		});
 	} catch (error) {
-		if (!isRecoverableZipError(error)) {
+		// After a JAR manifest, upstream would already have stopped, so a later unreadable entry still means JAR
+		if (!hasJarManifestEntry && !isRecoverableZipError(error)) {
 			throw error;
 		}
+
+		isLocalScanIncomplete = true;
 
 		if (openXmlState.isParsingContentTypes) {
 			openXmlState.isParsingContentTypes = false;
@@ -408,11 +445,24 @@ export async function detectZip(tokenizer) {
 		// Guess from the directory names instead.
 		if (
 			!fileType
+			&& !hasJarManifestEntry
 			&& (error instanceof strtok3.EndOfStreamError || error instanceof ParserHardLimitError || isZipScanLimitError(error))
 			&& !openXmlState.hasContentTypesEntry
 		) {
 			fileType = getOpenXmlFileTypeFromDirectoryNames(openXmlState);
 		}
+	}
+
+	if (!fileType && hasJarManifestEntry) {
+		if (isLocalScanIncomplete && tokenizer.supportsRandomAccess()) {
+			fileType = await getAndroidFileTypeFromCentralDirectory(tokenizer);
+		}
+
+		// No Android marker anywhere we could read, so it's a plain JAR
+		fileType ??= {
+			ext: 'jar',
+			mime: 'application/java-archive',
+		};
 	}
 
 	const iWorkFileType = hasUnknownFileSize(tokenizer)
